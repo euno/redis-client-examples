@@ -1,0 +1,17 @@
+*.class
+
+# Package Files #
+*.jar
+*.war
+*.ear
+
+# eclipse #
+/.classpath
+/.project
+/.settings
+
+# maven target dir #
+/target
+
+# Intellij IDEA #
+/.idea
