@@ -5,48 +5,67 @@ import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
 import com.redis.serialization.{Format, Parse}
 import com.redis.{RedisClient, RedisClientPool}
-import example.example.cache.serialization.{A3RedisFormat, A3RedisParse}
+
+/**
+ * A3用のRedisキャッシュシリアライズ、デシリアライズを定義したオブジェクト
+ */
+object A3Mapper {
+  val objectMapper = (new ObjectMapper() with ScalaObjectMapper).registerModule(DefaultScalaModule)
+
+  def parse[A](value: Array[Byte], typeDef: Class[A]): A = {
+    objectMapper.readValue[A](value, typeDef)
+  }
+
+  val format: PartialFunction[Any, Any] = new PartialFunction[Any, Any] {
+    override def isDefinedAt(x: Any): Boolean = true
+
+    override def apply(value: Any): Array[Byte] = {
+      objectMapper.writeValueAsBytes(value)
+    }
+  }
+}
+
 
 /**
  * 最もベースとなるRedisを操作する設定やオペレーションを持つtrait
  * @tparam T 値として格納する値の型
  * Created by a12043 on 2014/10/14.
  */
-sealed trait RedisCommonOperator[T] {
+trait RedisCommonOperator[T] {
   final val delimiter = "#"
+
+  final val redisClientPool: RedisClientPool = new RedisClientPool("localhost", 6379)
 
   val dbNumber: Int
 
   val prefix: String
 
-  val expireSec: Option[Int]
-
-  val redisClientPool: RedisClientPool
+  val expireSec: Option[Int] = None
 
   val redisType: String
 
-  val typeDef: Class[T]
+  var typeDef: Class[T]
 
   /**
    * キーや値のセリアライズに使うFormat
    */
-  implicit val format = new Format(A3RedisFormat)
+  implicit val format = new Format(A3Mapper.format)
 
   /**
    * キーや値のデシリアライズに使うParse(typeDefに依存するためlazy)
    */
-  implicit lazy val parse = new Parse[T](new A3RedisParse[T](typeDef).parse)
+  implicit lazy val parse = new Parse[T](A3Mapper.parse[T](_: Array[Byte], typeDef))
 
   /**
    * Redisに実際に格納するキーを組み立てる関数
    * @param key アプリケーションから渡されるキー
    * @return 実際にRedisに保存されるキー
    */
-  def setupCacheKey(key: Option[String]): String = {
-    _ match {
-      case Some(x) => redisType + delimiter + prefix + delimiter + key
-      case None => throw new IllegalArgumentException
+  def setupCacheKey(key: String): String = {
+    if (key == null || key.isEmpty) {
+      throw new IllegalArgumentException("key string is not acceptable null.")
     }
+    redisType + delimiter + prefix + delimiter + key
   }
 
   /**
@@ -101,6 +120,10 @@ sealed trait RedisCommonOperator[T] {
   def flushDb(): Boolean = {
     call(_.flushdb)
   }
+
+  def keyOf(value: T): String = {
+    throw new UnsupportedOperationException(s"keyOf method is not implemented. $getClass")
+  }
 }
 
 /**
@@ -108,11 +131,7 @@ sealed trait RedisCommonOperator[T] {
  * @tparam T キャッシュとして格納する値の型
  */
 trait RedisStringsOperator[T] extends RedisCommonOperator[T] {
-  final val typePrefix = "STRINGS"
-
-  override def setupCacheKey(key: String): String = {
-    typePrefix + delimiter + prefix + delimiter + key
-  }
+  override val redisType = "STRINGS"
 
   def get(key: String): Option[T] = {
     call[Option[T]](
@@ -131,4 +150,9 @@ trait RedisStringsOperator[T] extends RedisCommonOperator[T] {
       }
     )
   }
+
+  def set(value: T): Boolean = {
+    set(keyOf(value), value);
+  }
 }
+
