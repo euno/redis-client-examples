@@ -227,7 +227,7 @@ trait RedisListsOperator[K, V] extends RedisOperator[K, V] {
         client.del(cacheKey)
 
         // 値のセット
-        val result = client.lpush(cacheKey, value(0), value.slice(1, value.size): _*)
+        val result = client.rpush(cacheKey, value(0), value.slice(1, value.size): _*)
 
         // 有効期限の設定がある場合はそのセット
         expireSec match {
